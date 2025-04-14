@@ -1,0 +1,499 @@
+---
+title: "Practical Homework I"
+author: "Richa"
+date: "2025-04-03"
+output: html_document
+---
+
+## PRACTICAL HOMEWORK 1: DECISION TREES
+
+#### In this project, we are going to apply our knowledge of Decision Trees. We will be modelling single trees, pruning them, using ensemble methods like bagging, boosting and randomForests to explore and analyse youth drug use. The data given is very large (10,561 rows!) and has a lot of variabes (79!). Since we will not be using all of the variables, cleaning and factorsing variables of our choice will be smarter than cleaning all columns of the dataset.
+
+##### For this assignment, I have decided to focus on the question "IMPACT OF FAMILY BACKGROUND AND SOCIOECONOMIC STATUS ON MARIJUANA USE". We have around 15-20 variables of interest, which we will see throughout this assignment.
+
+```{r}
+#Importing Libraries
+library(dplyr)
+library(tidyr)
+library(tree)
+library(caret)
+library(ggplot2)
+library(randomForest) 
+library(gbm)  
+
+#Loading the Data
+load("/Users/rich/Downloads/youth_data.Rdata")
+View(df)
+
+#Exploring the Data
+ncol(df)
+nrow(df)
+str(df)
+summary(df)
+colnames(df)
+```
+
+
+##### The Codebook about this data explained in-depth about certain code conventions present in the data. The code conventions had to be either converted to 0 or NA depending on their meaning.
+
+```{r}
+#Cleaning Data
+#Substituting standard code conventions with NA
+code_conventions <- function(x) {
+  # Convert to numeric
+  x <- as.numeric(x)
+  
+  # Codes for "NEVER USED [DRUG(s) OF INTEREST]" 
+  never_used_codes <- c(91, 991, 9991, 81, 981, 9981)
+  x[x %in% never_used_codes] <- 0  
+  
+  # Codes for "USED [DRUG] BUT NOT IN THE PERIOD OF INTEREST" 
+  used_not_in_period_codes <- c(93, 993, 9993, 83, 983, 9983)
+  x[x %in% used_not_in_period_codes] <- 0  
+  
+  # Codes for "DON’T KNOW" 
+  dont_know_codes <- c(94, 994, 9994)
+  x[x %in% dont_know_codes] <- NA  
+  
+  # Codes for "REFUSED" 
+  refused_codes <- c(97, 997, 9997)
+  x[x %in% refused_codes] <- NA 
+  
+  # Codes for "BLANK (not answered)" 
+  blank_codes <- c(98, 998, 9998)
+  x[x %in% blank_codes] <- NA 
+  
+  # Codes for "LEGITIMATE SKIP" 
+  legitimate_skip_codes <- c(99, 999, 9999, 89, 989, 9989)
+  x[x %in% legitimate_skip_codes] <- NA  
+  
+  # Codes for "BAD DATA" 
+  bad_data_codes <- c(85, 985, 9985)
+  x[x %in% bad_data_codes] <- NA 
+  
+  return(x)
+}
+
+columns <- c("EDUSKPCOM", "EDUSCHGRD2", "IRALCFY", "IRMJFY", "IRCIGFM", "IRSMKLSS30N", 
+          "IRALCFM", "IRMJFM", "IRCIGAGE", "IRSMKLSSTRY", 
+          "IRALCAGE", "IRMJAGE")
+
+for (column in columns) {
+  df[[column]] <- code_conventions(df[[column]])
+}
+
+View(df)
+head(df)
+```
+
+
+##### For Classification Decision Trees data interpretation would be easier if all the numeric factors such as 0 = NO and 1 = YES are transformed to classes such as NO and YES. Also there are variables like INCOME which have classes between 1 and 4, each number representing different ranges of income. Factorising these variables is also important.
+
+```{r}
+# Converting numeric factors to labels for better data interpretation.
+#Binary Variables
+df$MRJFLAG  <- factor(df$MRJFLAG,  levels = c(0, 1), labels = c("No", "Yes"))
+df$ALCFLAG  <- factor(df$ALCFLAG,  levels = c(0, 1), labels = c("No", "Yes"))
+df$TOBFLAG  <- factor(df$TOBFLAG,  levels = c(0, 1), labels = c("No", "Yes"))
+df$PARCHKHW  <- factor(df$PARCHKHW,  levels = c(1, 2), labels = c("Yes", "No"))
+df$PARHLPHW  <- factor(df$PARHLPHW,  levels = c(1, 2), labels = c("Yes", "No"))
+df$PRCHORE2  <- factor(df$PRCHORE2,  levels = c(1, 2), labels = c("Yes", "No"))
+df$PRLMTTV2  <- factor(df$PRLMTTV2,  levels = c(1, 2), labels = c("Yes", "No"))
+df$PARLMTSN  <- factor(df$PARLMTSN,  levels = c(1, 2), labels = c("Yes", "No"))
+df$PRGDJOB2  <- factor(df$PRGDJOB2,  levels = c(1, 2), labels = c("Yes", "No"))
+df$PRPROUD2  <- factor(df$PRPROUD2,  levels = c(1, 2), labels = c("Yes", "No"))
+df$ARGUPAR   <- factor(df$ARGUPAR,   levels = c(1, 2), labels = c("Yes", "No"))
+df$PRPKCIG2  <- factor(df$PRPKCIG2,  levels = c(1, 2), labels = c("Yes", "No"))
+df$PRMJEVR2  <- factor(df$PRMJEVR2,  levels = c(1, 2), labels = c("Yes", "No"))
+df$PRMJMO    <- factor(df$PRMJMO,    levels = c(1, 2), labels = c("Yes", "No"))
+df$PRALDLY2  <- factor(df$PRALDLY2,  levels = c(1, 2), labels = c("Yes", "No"))
+df$GOVTPROG  <- factor(df$GOVTPROG,  levels = c(1, 2), labels = c("Yes", "No"))
+
+# Multi-category Variables
+df$IMOTHER <- factor(df$IMOTHER, levels = c(1, 2, 3, 4),
+                     labels = c("Yes", "No", "Don't know", "Over 18"))
+
+df$IFATHER <- factor(df$IFATHER, levels = c(1, 2, 3, 4),
+                     labels = c("Yes", "No", "Don't know", "Over 18"))
+
+# Ordered Variables
+df$INCOME <- factor(df$INCOME, levels = c(1, 2, 3, 4),
+                    labels = c("Less than $20,000", "$20,000 - $49,999", 
+                               "$50,000 - $74,999", "$75,000 or More"))
+
+df$POVERTY3 <- factor(df$POVERTY3, ordered = TRUE, levels = c(1, 2, 3, 4),
+                      labels = c("Below poverty level", "Up to 2X poverty threshold",
+                                 "Up to 3X poverty threshold", "More than 3X threshold"))
+```
+
+##### Visualising some plots concerning our variables, so we know how are the different classes populated in different variables. 
+
+```{r}
+# Data Visualisation
+# Plot INCOME vs ALCFLAG (Alcohol Use)
+ggplot(df, aes(x = INCOME, fill = ALCFLAG)) +
+  geom_bar(position = "dodge", stat = "count") +
+  labs(title = "INCOME vs Alcohol Use", x = "Income Level", y = "Count") +
+  scale_fill_manual(values = c("Yes" = "skyblue", "No" = "pink"))
+```
+
+```{r}
+# Plot PARCHKHW vs TOBFLAG
+ggplot(df, aes(x = PARCHKHW, fill = TOBFLAG)) +
+  geom_bar(position = "dodge", stat = "count") +
+  labs(title = "Parents Arguing vs Tobacco Use", x = "Parents Arguing (Yes/No)", y = "Count") +
+  scale_fill_manual(values = c("Yes" = "grey", "No" = "blue"))
+```
+
+```{r}
+ggplot(df, aes(x = PRCHORE2, fill = MRJFLAG)) +
+  geom_bar(position = "dodge", stat = "count") +
+  labs(title = "Doing Household Chores vs Tobacco Use", x = "Household Chores (Yes/No)", y = "Count") +
+  scale_fill_manual(values = c("Yes" = "yellow", "No" = "black"))
+```
+
+
+
+
+```{r}
+# POVERTY vs IRALCFY, IRMJFY
+df_line <- df %>%
+  group_by(POVERTY3) %>%
+  summarise(
+    Alcohol = mean(IRALCFY, na.rm = TRUE),
+    Marijuana = mean(IRMJFY, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  pivot_longer(cols = c(Alcohol, Marijuana), names_to = "Substance", values_to = "MeanUsage")
+
+ggplot(df_line, aes(x = POVERTY3, y = MeanUsage, color = Substance, group = Substance)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  labs(
+    title = "Mean Substance Use Frequency vs Poverty Level",
+    x = "Poverty Level",
+    y = "Mean Use Frequency"
+  ) +
+  theme_minimal()
+```
+
+
+```{r}
+#Train-Test Split (40%:60%)
+# Set seed for reproducibility
+set.seed(123)
+
+train_indices <- sample(1:nrow(df), size = 0.4 * nrow(df))
+df_train <- df[train_indices, ]
+df_test <- df[-train_indices, ]
+```
+
+
+#### BINARY CLASSIFICATION
+
+##### We use mincut, minsize, mindev so that the tree is more complex. There is not much variance in the data so without the three factors we end up with a stump. (Used Internet to get these factors in the tree function)
+
+```{r}
+# Set seed for reproducibility
+set.seed(123)
+
+# Factorization
+df_train$MRJFLAG <- as.factor(df_train$MRJFLAG)
+df_test$MRJFLAG <- as.factor(df_test$MRJFLAG)
+
+# Binary Tree Implementation
+binary_tree <- tree(MRJFLAG ~ PARCHKHW + PARHLPHW + PRCHORE2 + 
+                   PRLMTTV2 + PARLMTSN + PRGDJOB2 + PRPROUD2 + ARGUPAR + 
+                   PRMJEVR2 + PRMJMO + IMOTHER + IFATHER, 
+                   data = df_train, mincut = 7, minsize = 15, mindev = 0.001)
+
+# Predictions on test data, confusion matrix and accuracy calculation
+binary_pred <- predict(binary_tree, newdata = df_test, type = "class")
+binary_confusion_matrix <- table(predicted = binary_pred, actual = df_test$MRJFLAG)
+binary_accuracy <- sum(diag(binary_confusion_matrix)) / sum(binary_confusion_matrix)
+cat("Accuracy BEFORE pruning:", binary_accuracy, "\n")
+print(binary_confusion_matrix)
+
+# Cross - Validation for Optimization
+binary_cv <- cv.tree(binary_tree, FUN = prune.misclass)
+
+# Plot CV Error vs. Tree Size
+plot(binary_cv$size, binary_cv$dev, type = "b",
+     xlab = "Tree Size", ylab = "Misclassification Error", 
+     main = "CV Error vs. Tree Size")
+```
+
+##### The plot between Size and Deviance has only one error rate for all tree sizes! This can mean that the distribution of data in both the classes (Yes and No) is very imbalanced.
+
+```{r}
+table(df_train$MRJFLAG)
+prop.table(table(df_train$MRJFLAG))
+```
+
+##### We see that the Yes class has very few observations as opposed to the No class. We can upsample and downsample respectively to get some decent results. Let us try resampling.
+
+```{r}
+# Set seed for reproducibility
+set.seed(123)
+
+# Factorization
+df_train$MRJFLAG <- as.factor(df_train$MRJFLAG)
+df_test$MRJFLAG <- as.factor(df_test$MRJFLAG)
+
+# Downsampling the training set
+df_train_bal <- downSample(x = df_train[, -which(names(df_train) == "MRJFLAG")],
+                           y = df_train$MRJFLAG,
+                           yname = "MRJFLAG")
+
+# Checking class balance for Yes and No classes
+print(prop.table(table(df_train_bal$MRJFLAG)))
+
+# Binary Tree
+binary_tree1 <- tree(MRJFLAG ~ PARCHKHW + PARHLPHW + PRCHORE2 + 
+                    PRLMTTV2 + PARLMTSN + PRGDJOB2 + PRPROUD2 + ARGUPAR + 
+                    PRMJEVR2 + PRMJMO + IMOTHER + IFATHER,
+                    data = df_train_bal, mincut = 7, minsize = 15, mindev = 0.001)
+
+# Predictions on test data, confusion matrix and accuracy calculation
+binary_pred1 <- predict(binary_tree1, newdata = df_test, type = "class")
+confusion_matrix1 <- table(Predicted = binary_pred1, Actual = df_test$MRJFLAG)
+accuracy1 <- sum(diag(confusion_matrix1)) / sum(confusion_matrix1)
+accuracy1
+
+
+# Cross Validation and its plot
+binary_cv1 <- cv.tree(binary_tree1, FUN = prune.misclass)
+plot(binary_cv1$size, binary_cv1$dev, type = "b",
+     xlab = "Tree Size", ylab = "Misclassification Error",
+     main = "CV Error vs. Tree Size (Balanced Tree)")
+```
+
+##### We can clearly see from the plot and by using the elbow-method that 15 would be a great value to prune the tree to. Let us try that!
+
+```{r}
+# Set seed for reproducibility
+set.seed(123)
+
+# Pruning
+binary_pruned1 <- prune.tree(binary_tree1, best = 15)
+
+# Predictions on test data, confusion matrix and accuracy calculation
+binary_pred2 <- predict(binary_pruned1, newdata = df_test, type = "class")
+confusion_matrix2 <- table(Predicted = binary_pred2, Actual = df_test$MRJFLAG)
+accuracy2 <- sum(diag(confusion_matrix2)) / sum(confusion_matrix2)
+accuracy2
+
+# Plotting Trees
+# Unpruned Tree
+par(mfrow = c(1, 1), mar = c(1, 1, 4, 1))
+plot(binary_tree1, col = 2, lty = 1)
+text(binary_tree1, pretty = 0, cex = 0.6)
+title("Full Tree", line = 2)
+
+# Pruned Tree
+par(mfrow = c(1, 1), mar = c(1, 1, 4, 1))
+plot(binary_pruned1, col = 4, lty = 1)
+text(binary_pruned1, pretty = 0, cex = 0.6)
+title("Pruned Tree", line = 2)
+```
+
+##### The accuracy before and after pruning is 0.7031718 and 0.7227395, respectively. ThUS we seem to have successfully optimised our tree. We could have also tried bagging and boosting on our binary tree, to optimise it even further.
+
+#### MULTI-CLASS CLASSIFICATION
+
+##### Our response variable is MRJYDAYS which has classes from 1-6, 6 standing for non-user and no past year use. Thus, we eliminate class 6 from our data, to get better insights. We also remove NA values because bagging does not work with NA values in the dataset.
+
+```{r}
+# Set seed for reproducibility
+set.seed(123)
+
+# Factorization and Filtering of Data
+df_train <- subset(df_train, MRJYDAYS %in% 1:5)
+df_test <- subset(df_test, MRJYDAYS %in% 1:5)
+df_train$MRJYDAYS <- factor(df_train$MRJYDAYS)
+df_test$MRJYDAYS <- factor(df_test$MRJYDAYS)
+
+# Remove NA values
+df_train <- na.omit(df_train)
+df_test <- na.omit(df_test)
+
+# Multi-Class Tree
+multi_tree <- tree(MRJYDAYS ~ PARCHKHW + PARHLPHW + PRCHORE2 + PRLMTTV2 + 
+                       PARLMTSN + PRGDJOB2 + PRPROUD2 + ARGUPAR + PRMJEVR2 + 
+                       PRMJMO + IMOTHER + IFATHER + INCOME + GOVTPROG + 
+                       POVERTY3 + PRGDJOB2 + PRLMTTV2, 
+                   data = df_train, 
+                   control = tree.control(nobs = nrow(df_train), mincut = 5, minsize = 10, mindev = 0.0001))
+
+# Plot the tree
+plot(multi_tree)
+text(multi_tree, pretty = 0)
+
+# Predictions on test data, confusion matrix and accuracy calculation
+multi_pred <- predict(multi_tree, df_test, type = "class")
+multi_cm <- table(Predicted = multi_pred, Actual = df_test$MRJYDAYS)
+accuracy_multi <- sum(diag(multi_cm)) / sum(multi_cm)
+accuracy_multi
+
+# Bagging (mtry = 17, since there are 17 predictions)
+multi_bag <- randomForest(MRJYDAYS ~ PARCHKHW + PARHLPHW + PRCHORE2 + PRLMTTV2 + 
+                       PARLMTSN + PRGDJOB2 + PRPROUD2 + ARGUPAR + PRMJEVR2 + 
+                       PRMJMO + IMOTHER + IFATHER + INCOME + GOVTPROG + 
+                       POVERTY3 + PRGDJOB2 + PRLMTTV2,
+                         data = df_train,
+                         importance = TRUE, 
+                         mtry = 17,
+                         ntree = 100,
+                         na.action = na.omit)
+ 
+# Extract OOB error rate for each tree
+OOB_ERROR <- multi_bag$err.rate[, "OOB"]
+
+# Plot OOB error vs number of trees
+plot(OOB_ERROR, type = "l", col = "blue", lwd = 2,
+     xlab = "Number of Trees", ylab = "OOB Error Rate",
+     main = "OOB Error vs Number of Trees")
+
+# Bagging with tuning of mtry and ntree parameters for optimal accuracy
+multi_bag1 <- randomForest(MRJYDAYS ~ PARCHKHW + PARHLPHW + PRCHORE2 + PRLMTTV2 + 
+                       PARLMTSN + PRGDJOB2 + PRPROUD2 + ARGUPAR + PRMJEVR2 + 
+                       PRMJMO + IMOTHER + IFATHER + INCOME + GOVTPROG + 
+                       POVERTY3 + PRGDJOB2 + PRLMTTV2,
+                         data = df_train,
+                         importance = TRUE, 
+                         mtry = 8,
+                         ntree = 25,
+                         na.action = na.omit)
+
+# Predictions on test data, confusion matrix and accuracy calculation
+multi_bag_pred1 <- predict(multi_bag1, df_test)
+multi_bag_cm1 <- table(Predicted = multi_bag_pred1, Actual = df_test$MRJYDAYS)
+accuracy_multi_bag1 <- sum(diag(multi_bag_cm1)) / sum(multi_bag_cm1)
+accuracy_multi_bag1
+
+# Bagging with tuning of mtry and ntree parameters for optimal accuracy
+multi_bag2 <- randomForest(MRJYDAYS ~ PARCHKHW + PARHLPHW + PRCHORE2 + PRLMTTV2 + 
+                       PARLMTSN + PRGDJOB2 + PRPROUD2 + ARGUPAR + PRMJEVR2 + 
+                       PRMJMO + IMOTHER + IFATHER + INCOME + GOVTPROG + 
+                       POVERTY3 + PRGDJOB2 + PRLMTTV2,
+                         data = df_train,
+                         importance = TRUE, 
+                         mtry = 5,
+                         ntree = 25,
+                         na.action = na.omit)
+
+# Predictions on test data, confusion matrix and accuracy calculation
+multi_bag_pred2 <- predict(multi_bag2, df_test)
+multi_bag_cm2 <- table(Predicted = multi_bag_pred2, Actual = df_test$MRJYDAYS)
+accuracy_multi_bag2 <- sum(diag(multi_bag_cm2)) / sum(multi_bag_cm2)
+accuracy_multi_bag2
+
+varImpPlot(multi_bag2)
+```
+
+##### The graph for OOB vs Number of Trees is not something like we have seen in class, so keeping both parameters in mind, I chose n = 25. Then we played around with mtry and got improvements on our accuracy. We can tune these parameters further to find better accuracy.
+
+
+#### REGRESSION
+
+##### For regression we make sure our response variable is numeric and plot MSEs instead of accuracies, as it is preferred for regression models.
+
+```{r}
+# Set seed for reproducibility
+set.seed(123)
+
+# Ensuring IRMJFY is numeric (for regression)
+df_train$IRMJFY <- as.numeric(df_train$IRMJFY)
+df_test$IRMJFY <- as.numeric(df_test$IRMJFY)  
+
+# Regression Tree
+reg_tree_model <- tree(IRMJFY ~ PARCHKHW + PARHLPHW + PRCHORE2 + PRLMTTV2 + 
+                       PARLMTSN + PRGDJOB2 + PRPROUD2 + ARGUPAR + PRMJEVR2 + 
+                       PRMJMO + IMOTHER + IFATHER + INCOME + GOVTPROG + 
+                       POVERTY3 + PRGDJOB2 + PRLMTTV2, data = df_train)
+reg_tree_model
+
+# Predictions on test set
+pred_tree <- predict(reg_tree_model, df_test)
+
+# MSE for Regression Tree
+mse_tree <- mean((pred_tree - df_test$IRMJFY)^2)
+cat("MSE for Regression Tree:", round(mse_tree, 4), "\n")
+
+# Boosting with different shrinkage values
+reg_boost1 <- gbm(IRMJFY ~ PARCHKHW + PARHLPHW + PRCHORE2 + PRLMTTV2 + 
+                     PARLMTSN + PRGDJOB2 + PRPROUD2 + ARGUPAR + PRMJEVR2 + 
+                     PRMJMO + IMOTHER + IFATHER + INCOME + GOVTPROG + 
+                     POVERTY3 + PRGDJOB2 + PRLMTTV2, 
+                     data = df_train, 
+                     distribution = "gaussian",  
+                     interaction.depth = 3,     
+                     shrinkage = 0.001,
+                     n.trees = 250,
+                     cv.folds = 5)  # 5-fold cross-validation
+
+reg_boost2 <- gbm(IRMJFY ~ PARCHKHW + PARHLPHW + PRCHORE2 + PRLMTTV2 + 
+                     PARLMTSN + PRGDJOB2 + PRPROUD2 + ARGUPAR + PRMJEVR2 + 
+                     PRMJMO + IMOTHER + IFATHER + INCOME + GOVTPROG + 
+                     POVERTY3 + PRGDJOB2 + PRLMTTV2, 
+                     data = df_train, 
+                     distribution = "gaussian",  # For regression
+                     n.trees = 250,              # Number of boosting iterations
+                     interaction.depth = 3,      # Max depth of each tree
+                     shrinkage = 0.01,
+                     cv.folds = 5)
+
+reg_boost3 <- gbm(IRMJFY ~ PARCHKHW + PARHLPHW + PRCHORE2 + PRLMTTV2 + 
+                     PARLMTSN + PRGDJOB2 + PRPROUD2 + ARGUPAR + PRMJEVR2 + 
+                     PRMJMO + IMOTHER + IFATHER + INCOME + GOVTPROG + 
+                     POVERTY3 + PRGDJOB2 + PRLMTTV2, 
+                     data = df_train, 
+                     distribution = "gaussian",  # For regression
+                     n.trees = 250,              # Number of boosting iterations
+                     interaction.depth = 3,      # Max depth of each tree
+                     shrinkage = 0.05,
+                     cv.folds = 5)
+
+reg_boost4 <- gbm(IRMJFY ~ PARCHKHW + PARHLPHW + PRCHORE2 + PRLMTTV2 + 
+                     PARLMTSN + PRGDJOB2 + PRPROUD2 + ARGUPAR + PRMJEVR2 + 
+                     PRMJMO + IMOTHER + IFATHER + INCOME + GOVTPROG + 
+                     POVERTY3 + PRGDJOB2 + PRLMTTV2, 
+                     data = df_train, 
+                     distribution = "gaussian",  # For regression
+                     n.trees = 250,              # Number of boosting iterations
+                     interaction.depth = 3,      # Max depth of each tree
+                     shrinkage = 0.1,
+                     cv.folds = 5)
+
+reg_boost5 <- gbm(IRMJFY ~ PARCHKHW + PARHLPHW + PRCHORE2 + PRLMTTV2 + 
+                     PARLMTSN + PRGDJOB2 + PRPROUD2 + ARGUPAR + PRMJEVR2 + 
+                     PRMJMO + IMOTHER + IFATHER + INCOME + GOVTPROG + 
+                     POVERTY3 + PRGDJOB2 + PRLMTTV2, 
+                     data = df_train, 
+                     distribution = "gaussian",  # For regression
+                     n.trees = 250,              # Number of boosting iterations
+                     interaction.depth = 3,      # Max depth of each tree
+                     shrinkage = 0.3,
+                     cv.folds = 5)
+
+# MSE 
+mse1 <- min(reg_boost1$cv.error, na.rm = TRUE)
+mse2 <- min(reg_boost2$cv.error, na.rm = TRUE)
+mse3 <- min(reg_boost3$cv.error, na.rm = TRUE)
+mse4 <- min(reg_boost4$cv.error, na.rm = TRUE)
+mse5 <- min(reg_boost5$cv.error, na.rm = TRUE)
+
+# Shrinkage values and MSE values
+shrinkage_values <- c(0.001, 0.01, 0.05, 0.1, 0.3)
+mse_values <- c(mse1, mse2, mse3, mse4, mse5)
+
+# Plot MSE vs. Shrinkage
+plot(shrinkage_values, mse_values, type = "b", pch = 19, col = "darkred",
+     xlab = "Shrinkage (Learning Rate)",
+     ylab = "Cross-Validated MSE",
+     main = "Shrinkage vs. Cross-Validated MSE")
+
+```
+
+##### We see from the plot that the boosting model with 0.1 shrinkage value has minimum MSE. Thus model 4 would be an optimal model.
+
